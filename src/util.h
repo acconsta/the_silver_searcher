@@ -64,9 +64,7 @@ void generate_find_skip(const char *find, const size_t f_len, size_t **skip_look
 size_t ag_max(size_t a, size_t b);
 
 const char *boyer_moore_strnstr(const char *s, const char *find, const size_t s_len, const size_t f_len,
-                                const size_t alpha_skip_lookup[], const size_t *find_skip_lookup);
-const char *boyer_moore_strncasestr(const char *s, const char *find, const size_t s_len, const size_t f_len,
-                                    const size_t alpha_skip_lookup[], const size_t *find_skip_lookup);
+                                const size_t alpha_skip_lookup[], const size_t *find_skip_lookup, const int case_sensitive);
 
 strncmp_fp get_strstr(enum case_behavior opts);
 

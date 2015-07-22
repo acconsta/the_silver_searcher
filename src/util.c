@@ -4,6 +4,9 @@
 #include <stdarg.h>
 #include <stdlib.h>
 #include <sys/stat.h>
+#ifdef __SSE4_2__
+#include <nmmintrin.h>
+#endif
 
 #include "util.h"
 #include "config.h"
@@ -149,48 +152,55 @@ size_t ag_max(size_t a, size_t b) {
 
 /* Boyer-Moore strstr */
 const char *boyer_moore_strnstr(const char *s, const char *find, const size_t s_len, const size_t f_len,
-                                const size_t alpha_skip_lookup[], const size_t *find_skip_lookup) {
+                                const size_t alpha_skip_lookup[], const size_t *find_skip_lookup, const int case_sensitive) {
     ssize_t i;
     size_t pos = f_len - 1;
 
+#ifdef __SSE4_2__
+    const __m128i aAdiff = _mm_set1_epi8('a' - 'A');
+    const __m128i A_vec = _mm_set1_epi8('A' - 1);
+    const __m128i Z_vec = _mm_set1_epi8('Z');
     while (pos < s_len) {
-        for (i = f_len - 1; i >= 0 && s[pos] == find[i]; pos--, i--) {
+        __m128i haystack_chunk = _mm_loadu_si128((const __m128i *)(s + pos + 1 - f_len));
+        if (!case_sensitive) {
+            __asm__ volatile(
+                "movdqa    %1, %%xmm6 \n\t"
+                "movdqa    %1, %%xmm7 \n\t"
+                "pcmpgtb   %3, %%xmm6 \n\t"
+                "pcmpgtb   %4, %%xmm7 \n\t"
+                "pandn     %%xmm6, %%xmm7 \n\t"
+                "pand      %2, %%xmm7 \n\t"
+                "paddusb   %%xmm7, %0 \n\t"
+                : "=x"(haystack_chunk)
+                : "x"(haystack_chunk), "x"(aAdiff), "x"(A_vec), "x"(Z_vec)
+                : "xmm6", "xmm7");
+        }
+        __asm__ volatile(
+            // Unsigned bytes, compare equal each, negative polarity,
+            // most signficant index
+            "pcmpestri $0x58, %2, %1 \n\t"
+            : "=c"(i)
+            : "x"(*(const __m128i *)find), "x"(haystack_chunk), "a"(f_len), "d"(f_len));
+        pos -= (f_len - 1 - i);
+        if (i == 16) { // No mismatch found
+            pos -= 17;
+#else
+    while (pos < s_len) {
+        if (case_sensitive) {
+            for (i = f_len - 1; i >= 0 && s[pos] == find[i]; pos--, i--) {
+            }
+        } else {
+            for (i = f_len - 1; i >= 0 && tolower(s[pos]) == find[i]; pos--, i--) {
+            }
         }
         if (i < 0) {
+#endif
             return s + pos + 1;
         }
         pos += ag_max(alpha_skip_lookup[(unsigned char)s[pos]], find_skip_lookup[i]);
     }
 
     return NULL;
-}
-
-/* Copy-pasted from above. Yes I know this is bad. One day I might even fix it. */
-const char *boyer_moore_strncasestr(const char *s, const char *find, const size_t s_len, const size_t f_len,
-                                    const size_t alpha_skip_lookup[], const size_t *find_skip_lookup) {
-    ssize_t i;
-    size_t pos = f_len - 1;
-
-    while (pos < s_len) {
-        for (i = f_len - 1; i >= 0 && tolower(s[pos]) == find[i]; pos--, i--) {
-        }
-        if (i < 0) {
-            return s + pos + 1;
-        }
-        pos += ag_max(alpha_skip_lookup[(unsigned char)s[pos]], find_skip_lookup[i]);
-    }
-
-    return NULL;
-}
-
-strncmp_fp get_strstr(enum case_behavior casing) {
-    strncmp_fp ag_strncmp_fp = &boyer_moore_strnstr;
-
-    if (casing == CASE_INSENSITIVE) {
-        ag_strncmp_fp = &boyer_moore_strncasestr;
-    }
-
-    return ag_strncmp_fp;
 }
 
 size_t invert_matches(const char *buf, const size_t buf_len, match_t matches[], size_t matches_len) {
