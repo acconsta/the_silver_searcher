@@ -147,6 +147,31 @@ size_t ag_max(size_t a, size_t b) {
     return a;
 }
 
+void generate_hash(const char *find, const size_t f_len, offset_t *h_table, const int case_sensitive) {
+    const size_t W_size = sizeof(W_t);
+    int i;
+    for (i = f_len - W_size; i >= 0; i--) {
+        // Add all 2^W_size combinations of capital letters to the hash table
+        int caps_set;
+        for (caps_set = 0; caps_set < (1 << W_size); caps_set++) {
+            char word[W_size];
+            memcpy(&word, find + i, W_size);
+            int cap_index;
+            for (cap_index = 0; caps_set >> cap_index; cap_index++) {
+                if ((caps_set >> cap_index) & 1)
+                    word[cap_index] -= 'a' - 'A';
+            }
+            size_t h = *(W_t *)(&word) % H_SIZE;
+            while (h_table[h])
+                h = (h + 1) % H_SIZE; // find free cell
+            h_table[h] = i + 1;
+            // Only one loop iteration if case sensitive
+            if (case_sensitive)
+                break;
+        }
+    }
+}
+
 /* Boyer-Moore strstr */
 const char *boyer_moore_strnstr(const char *s, const char *find, const size_t s_len, const size_t f_len,
                                 const size_t alpha_skip_lookup[], const size_t *find_skip_lookup) {
@@ -182,6 +207,45 @@ const char *boyer_moore_strncasestr(const char *s, const char *find, const size_
 
     return NULL;
 }
+
+const char *hash_strnstr(const char *s, const char *find, const size_t s_len, const size_t f_len, offset_t *h_table, const int case_sensitive) {
+    const size_t W_size = sizeof(W_t);
+    const size_t step = f_len - W_size + 1;
+
+    // Step through s
+    if (s_len < f_len)
+        return NULL;
+    size_t s_i = f_len - W_size;
+    for (; s_i <= s_len - f_len; s_i += step) {
+        size_t h;
+        for (h = *(W_t *)(s + s_i) % H_SIZE; h_table[h]; h = (h + 1) % H_SIZE) {
+            const char *R = s + s_i - (h_table[h] - 1);
+            size_t i;
+            // Check putative match
+            for (i = 0; i < f_len; i++) {
+                if ((case_sensitive ? R[i] : tolower(R[i])) != find[i])
+                    goto next_hash_cell;
+            }
+            return R; // found
+        next_hash_cell:
+            ;
+        }
+    }
+    // Check tail
+    for (s_i = s_i - step + 1; s[s_i]; s_i++) {
+        int i;
+        const char *R = s + s_i;
+        for (i = 0; find[i] && R[i]; ++i) {
+            char s_c = case_sensitive ? R[i] : tolower(R[i]);
+            if (s_c != find[i])
+                break;
+        }
+        if (!find[i])
+            return s + s_i;
+    }
+    return NULL;
+}
+
 
 strncmp_fp get_strstr(enum case_behavior casing) {
     strncmp_fp ag_strncmp_fp = &boyer_moore_strnstr;

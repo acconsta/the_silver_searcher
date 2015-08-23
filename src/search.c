@@ -48,6 +48,8 @@ void search_buf(const char *buf, const size_t buf_len,
 
         while (buf_offset < buf_len) {
             match_ptr = ag_strnstr_fp(match_ptr, opts.query, buf_len - buf_offset, opts.query_len, alpha_skip_lookup, find_skip_lookup);
+            // TODO: choose which
+            match_ptr = hash_strnstr(match_ptr, opts.query, buf_len - buf_offset, opts.query_len, h_table, opts.casing == CASE_SENSITIVE);
             if (match_ptr == NULL) {
                 break;
             }
